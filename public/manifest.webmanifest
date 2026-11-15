@@ -1,0 +1,20 @@
+{
+  "name": "Triplette — trois cartes identiques, et le trio est à toi",
+  "short_name": "Triplette",
+  "description": "Jeu de cartes de mémoire et de déduction pour 3 à 6 joueurs, chacun sur son téléphone. Sans compte.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#140a2e",
+  "theme_color": "#140a2e",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
