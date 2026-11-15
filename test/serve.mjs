@@ -1,6 +1,7 @@
 // Serveur de développement : sert public/ sous /trio-game/ (comme GitHub Pages)
 // et lance un relais MQTT local (WebSocket) pour jouer à plusieurs sans Internet.
-// Usage : npm run dev   → ouvre l'adresse affichée dans plusieurs onglets de cet ordinateur.
+// Usage : npm run dev   → ouvre l'adresse affichée, puis d'autres onglets : chacun propose de
+// « jouer ici comme un autre joueur ».
 // (Sur un téléphone, le chiffrement exige une adresse https : on y joue depuis l'adresse publiée.)
 import http from 'node:http';
 import fs from 'node:fs';

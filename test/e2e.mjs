@@ -489,6 +489,48 @@ await scenario('captures : 6 joueurs, animations, petits écrans, partie interro
   for (const p of all) await p.context.close();
 });
 
+await scenario('deux-onglets : un seul onglet par identité, ou un autre joueur par onglet', async () => {
+  const host = await phone('Lou');
+  await host.page.fill('#name', 'Lou');
+  await host.page.click('#btnCreate');
+  await host.page.waitForSelector('#roomCode');
+  const code = await text(host.page, '#roomCode');
+  // un deuxième onglet du même navigateur partage l'identité (et la partie) du premier : il n'en fait rien et attend
+  const tab2 = await host.context.newPage();
+  tab2.on('pageerror', (e) => errors.push(`onglet 2 : ${e.message}`));
+  await tab2.goto(`${APP}&room=${code}`);
+  await tab2.waitForSelector('#busy');
+  assert.equal(await tab2.locator('#name, #roomCode, #members').count(), 0, 'le second onglet ne démarre pas le jeu');
+  assert.equal((await hostState(host)).members.length, 1);
+  await shot({ page: tab2 }, 'o-deja-ouvert');
+  // « jouer ici comme un autre joueur » : l'onglet prend une identité à part et garde l'invitation
+  await tab2.click('#btnOtherPlayer');
+  await tab2.waitForFunction(() => window.__tpReady === true);
+  assert.match(tab2.url(), /[?&]as=[a-z0-9]+/);
+  assert.ok((await text(tab2, '.invite')).includes(code));
+  await tab2.fill('#name', 'Max');
+  await tab2.click('#btnJoinInvite');
+  await tab2.waitForSelector('#members');
+  await until(async () => (await host.page.locator('#members li').count()) === 2, 'le second onglet a rejoint comme un autre joueur');
+  const ids = await tab2.evaluate(() => Object.keys(localStorage).filter((k) => k.endsWith('tp:device')).map((k) => JSON.parse(localStorage.getItem(k)).id));
+  assert.equal(new Set(ids).size, 2, 'deux identités distinctes dans le même navigateur');
+  // cet onglet-là, rechargé, garde son identité et sa place dans le salon
+  await tab2.reload();
+  await tab2.waitForFunction(() => window.__tpReady === true);
+  await tab2.waitForSelector('#members');
+  assert.equal(await tab2.locator('#members li').count(), 2);
+  // un troisième onglet attend ; quand le premier se ferme, il prend le relais et retrouve le salon de l'hôte
+  const tab3 = await host.context.newPage();
+  await tab3.goto(APP);
+  await tab3.waitForSelector('#busy');
+  await host.page.close();
+  await tab3.waitForSelector('#roomCode', { timeout: 10000 });
+  assert.equal(await text(tab3, '#roomCode'), code);
+  assert.equal(await tab3.locator('#btnLaunch').count(), 1, 'il a repris la partie de l\'hôte');
+  await until(async () => (await tab2.locator('#members li .presence.on').count()) === 2, 'hôte de nouveau en ligne pour le joueur');
+  await host.context.close();
+});
+
 await scenario('adresse-non-securisee : message clair au lieu d\'une partie sans chiffrement', async () => {
   // hors https (et hors localhost), le navigateur ne fournit pas Web Crypto : pas de partie possible
   const plain = await chromium.launch({ args: ['--host-resolver-rules=MAP jeu.test 127.0.0.1'] });

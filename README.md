@@ -81,10 +81,12 @@ Si le premier déploiement échoue sur « configure-pages » : **Settings → Pa
 
 ```bash
 npm install
-npm run dev          # appli + relais local : ouvre l'adresse affichée dans plusieurs onglets (un par joueur)
+npm run dev          # appli + relais local : ouvre l'adresse affichée, puis d'autres onglets pour les autres joueurs
 npm test             # moteur, réseau (relais local + « espion ») et 2 400 parties simulées
 npm run e2e          # parties complètes avec un navigateur par joueur (Playwright requis)
 ```
+
+**Essayer seul.** Deux onglets d'un même navigateur partagent le même stockage, donc la même identité : le second affiche « Triplette est déjà ouvert » et attend. Son bouton « Jouer ici comme un autre joueur » lui donne une identité à part (`?as=…` dans l'adresse) : un onglet par joueur suffit alors pour faire une partie complète, en local comme sur le site publié.
 
 Sur un téléphone, le chiffrement des mains exige une adresse `https` : on y joue depuis l'adresse publiée, pas depuis le serveur de développement.
 

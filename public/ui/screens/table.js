@@ -49,7 +49,11 @@ export function tableScreen(ctx) {
     if (lock && lock.gameId === net.room.gameId && lock.step === now.step && Date.now() - lock.at < 1500) return;
     ui.lock = { gameId: net.room.gameId, step: now.step, at: Date.now() };
     ctx.sound.tap();
-    if (el) el.classList.add('pending');
+    if (el) {
+      // l'élément disparaît dès que la carte est retournée ; si l'action n'aboutit pas, il ne doit pas rester en attente
+      el.classList.add('pending');
+      setTimeout(() => el.classList.remove('pending'), 1600);
+    }
     net.reveal(move).then((ok) => { if (!ok) { ui.lock = null; if (el) el.classList.remove('pending'); } });
   }
 

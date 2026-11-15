@@ -2,11 +2,11 @@
 
 import * as MQ from './vendor/mqtt.esm.js';
 import { Net } from './net/room.js';
-import { storage, prefs } from './state/store.js';
+import { storage, prefs, profile } from './state/store.js';
 import { sound } from './ui/sound.js';
 import { h, dur } from './ui/dom.js';
 import { installDefs, ICON } from './ui/art.js';
-import { openSheet, closeTopSheet, closeAllSheets, confirmSheet, settingRows, rulesContent, linksTable, toast } from './ui/components.js';
+import { card, openSheet, closeTopSheet, closeAllSheets, confirmSheet, settingRows, rulesContent, linksTable, toast } from './ui/components.js';
 import { homeScreen, joiningScreen } from './ui/screens/home.js';
 import { lobbyScreen } from './ui/screens/lobby.js';
 import { rulesScreen } from './ui/screens/rules.js';
@@ -113,6 +113,7 @@ const buzz = (pattern) => { try { navigator.vibrate?.(pattern); } catch { /* san
 /** Appelé à chaque changement venant du réseau : sons et effets, puis nouvel affichage. */
 function update() {
   const { net } = ctx;
+  if (!net) return; // l'appli attend encore qu'un autre onglet lui laisse la place
   const room = net.room;
   const g = net.status === 'room' ? room?.game : null;
   if (g) {
@@ -205,7 +206,7 @@ function trapBack() { try { history.pushState({ tp: 1 }, ''); } catch { /* sans 
 window.addEventListener('popstate', () => {
   trapBack();
   if (closeTopSheet()) return;
-  if (ctx.net.status === 'idle' && ui.screen === 'rules') go('home');
+  if (ctx.net?.status === 'idle' && ui.screen === 'rules') go('home');
 });
 document.addEventListener('pointerdown', () => { sound.unlock(); trapBack(); }, { once: true });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); schedule(); } });
@@ -226,22 +227,60 @@ async function keepAwake() {
 
 // ───────────────────────────────────────────── Démarrage
 
+function start() {
+  ctx.net = new Net({
+    connect: mqtt.connect,
+    broker: BROKER,
+    storage,
+    onUpdate: schedule,
+    onError: (msg) => { toast(msg, { tone: 'warn' }); sound.error(); },
+    // délais réglables par l'adresse pour les tests de bout en bout (ex. ?miss=600&trio=800&grace=3000)
+    ...Object.fromEntries([['miss', 'missMs'], ['trio', 'trioMs'], ['grace', 'graceMs']]
+      .filter(([q]) => /^\d{2,6}$/.test(params.get(q) || ''))
+      .map(([q, opt]) => [opt, Number(params.get(q))])),
+  });
+  render(true);
+  trapBack();
+  ctx.net.resume().catch(() => {}).finally(() => { window.__tpReady = true; schedule(); });
+}
+
+/**
+ * Écran d'attente quand le jeu tourne déjà dans un autre onglet du même navigateur. Les deux
+ * onglets auraient la même identité et, chez l'hôte, la même partie enregistrée : ils se
+ * marcheraient dessus. Celui-ci attend donc son tour, ou devient un autre joueur.
+ */
+function busyScreen() {
+  const asOtherPlayer = () => {
+    const url = new URL(location.href);
+    url.searchParams.set('as', Math.random().toString(36).slice(2, 7));
+    if (ui.invite) url.searchParams.set('room', ui.invite);
+    location.replace(url.toString());
+  };
+  return h('section', { class: 'screen busy', id: 'busy' },
+    h('div', { class: 'joining-main' },
+      h('div', { class: 'busy-cards', 'aria-hidden': 'true' }, [-1, 0, 1].map((k) => h('div', { class: 'busy-card', style: { '--k': String(k) } }, card()))),
+      h('h1', { class: 'busy-title' }, 'Triplette est déjà ouvert'),
+      h('p', { class: 'busy-text' }, 'Un autre onglet de ce navigateur utilise déjà le jeu. Retournes-y, ou ferme-le : cette page prendra le relais toute seule.')),
+    h('div', { class: 'bottom-actions' },
+      h('button', { class: 'btn big', id: 'btnOtherPlayer', onClick: asOtherPlayer }, 'Jouer ici comme un autre joueur'),
+      h('p', { class: 'hint' }, 'Pratique pour essayer le jeu seul : chaque onglet devient un joueur différent.')));
+}
+
 applySettings();
 installDefs();
-ctx.net = new Net({
-  connect: mqtt.connect,
-  broker: BROKER,
-  storage,
-  onUpdate: schedule,
-  onError: (msg) => { toast(msg, { tone: 'warn' }); sound.error(); },
-  // délais réglables par l'adresse pour les tests de bout en bout (ex. ?miss=600&trio=800&grace=3000)
-  ...Object.fromEntries([['miss', 'missMs'], ['trio', 'trioMs'], ['grace', 'graceMs']]
-    .filter(([q]) => /^\d{2,6}$/.test(params.get(q) || ''))
-    .map(([q, opt]) => [opt, Number(params.get(q))])),
-});
-render(true);
-trapBack();
-ctx.net.resume().catch(() => {}).finally(() => { window.__tpReady = true; schedule(); });
+if (navigator.locks?.request) {
+  // un verrou par identité : le premier onglet le garde tant qu'il est ouvert, les suivants attendent
+  let started = false;
+  const go1 = () => { if (started) return; started = true; clearTimeout(notice); start(); };
+  const notice = setTimeout(() => {
+    if (started) return;
+    document.getElementById('app').replaceChildren(busyScreen());
+    document.body.dataset.screen = 'busy';
+  }, 600);
+  navigator.locks.request(`triplette${profile ? `:${profile}` : ''}`, () => { go1(); return new Promise(() => {}); }).catch(go1);
+} else {
+  start();
+}
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });

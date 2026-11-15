@@ -184,6 +184,11 @@ svg text { font-family: inherit; }
 .joining-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
 .joining-lead { color: var(--muted); font-size: 17px; margin-top: 6px; }
 .joining-note { color: var(--muted); font-size: 14.5px; }
+.busy { text-align: center; }
+.busy-cards { display: flex; justify-content: center; margin-bottom: 14px; }
+.busy-card { width: 66px; margin: 0 -8px; transform: rotate(calc(var(--k) * 10deg)) translateY(calc(var(--k) * var(--k) * 6px)); }
+.busy-title { font-size: 26px; font-weight: 900; line-height: 1.15; }
+.busy-text { color: #e1d8f7; font-size: 16px; line-height: 1.45; max-width: 32ch; }
 .room-code { font-size: clamp(44px, 15vw, 60px); font-weight: 900; letter-spacing: 0.18em; padding-left: 0.18em; line-height: 1.05; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; font-variant-numeric: tabular-nums; }
 .code-card .btn { width: 100%; }
 

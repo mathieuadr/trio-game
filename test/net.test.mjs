@@ -105,6 +105,13 @@ async function act(t, move) {
   return host.host.game;
 }
 const settled = (host) => until(() => host.host.game.phase !== 'resolve', 'fin de tour automatique');
+/** Le joueur actif rate son tour, où qu'il en soit ; rend la main pendant que les cartes sont encore visibles. */
+async function forceMiss(t) {
+  await settled(t.host);
+  let g = t.host.host.game;
+  if (!g.picks.length) { await act(t, legalMoves(g)[0]); g = t.host.host.game; }
+  await act(t, legalMoves(g).find((m) => peek(g, m) !== g.picks[0].v));
+}
 
 /** Fait jouer une partie entière par des joueurs qui se souviennent plus ou moins de tout. */
 async function playOut(t, rng, skill = 0.9) {
@@ -248,14 +255,14 @@ for (const n of [3, 4, 5, 6]) {
 
     // ── analyse du trafic capturé par l'espion
     await sleep(150);
-    let publicMsgs = 0; let sealed = 0;
+    let gameStates = 0; let sealed = 0;
     const handSizes = new Set();
     for (const { topic, raw } of s.seen) {
       if (!raw) continue;
       const kind = topic.split('/')[2];
       const msg = JSON.parse(raw);
       if (kind === 'state') {
-        publicMsgs += 1;
+        if (msg.game) gameStates += 1;
         assert.ok(!/"(hands|hand|won|id)":\s*[[\d]/.test(raw.replace(/"id":"[0-9a-f]+"/g, '')), `secret en clair dans l'état public : ${raw.slice(0, 200)}`);
         if (msg.game) {
           assert.deepEqual(publicLeaks(msg.game), []);
@@ -274,7 +281,8 @@ for (const n of [3, 4, 5, 6]) {
         assert.deepEqual(Object.keys(msg).sort(), ['key', 'name', 't'], 'une demande pour rejoindre ne contient que le prénom et la clé publique');
       }
     }
-    assert.ok(publicMsgs > 10 && sealed >= n - 1, `trafic observé (${publicMsgs} publics, ${sealed} privés)`);
+    // l'analyse ne tourne pas à vide : au minimum la donne et les trois révélations d'un trio, et une main par joueur
+    assert.ok(gameStates >= 4 && sealed >= n - 1, `trafic observé (${gameStates} états de partie, ${sealed} mains chiffrées)`);
     assert.equal(handSizes.size, 1, `toutes les mains chiffrées ont la même taille, quelles que soient les cartes (${[...handSizes]})`);
     // un joueur ne peut pas lire la main d'un autre, même en écoutant le relais
     const [a, b] = guests;
@@ -295,7 +303,7 @@ for (const n of [3, 4, 5, 6]) {
 }
 
 test('règles appliquées par l\'hôte : hors tour refusé, double appui ignoré, deux actions en même temps', async () => {
-  const t = await table(['Ana', 'Ben', 'Chloé', 'Dov'], { hostOpts: { missMs: 400, trioMs: 400 } });
+  const t = await table(['Ana', 'Ben', 'Chloé', 'Dov'], { hostOpts: { missMs: 400, trioMs: 400, rng: seeded(7) } });
   const { host, all } = t;
   await host.send({ t: 'settings', first: all[1].id });
   await host.send({ t: 'start' });
@@ -346,23 +354,24 @@ test('règles appliquées par l\'hôte : hors tour refusé, double appui ignoré
   const now = bySeat(all, host.room)[g.current];
   const intruder = all.find((p) => p !== now);
   const reveals = g.reveals;
-  await Promise.all([intruder.reveal({ from: 'center', slot: center }), now.reveal({ from: 'center', slot: center })]);
+  const same = legalMoves(g)[0];
+  await Promise.all([intruder.reveal(same), now.reveal(same)]);
   await until(() => host.host.game.reveals === reveals + 1, 'action du joueur actif appliquée');
   await sleep(150);
   assert.equal(host.host.game.reveals, reveals + 1);
   assert.ok(intruder.errors.some((e) => /de jouer/.test(e)));
 
   // pendant la résolution d'un tour raté, plus rien ne se révèle ; puis le tour passe tout seul
-  g = host.host.game;
-  const other2 = legalMoves(g).find((m) => peek(g, m) !== g.picks[0].v);
-  await act(t, other2);
+  await forceMiss(t);
   g = host.host.game;
   assert.deepEqual([g.phase, g.outcome], ['resolve', 'miss']);
   await sameView(all, host);
   const turnNow = g.turn;
   const cur = g.current;
-  await now.reveal({ from: 'center', slot: g.center.findIndex((c, i) => c && !g.picks.some((p) => p.slot === i)) });
-  await sleep(120);
+  const still = bySeat(all, host.room)[cur];
+  const hidden = g.center.findIndex((c, i) => c && !g.picks.some((p) => p.from === 'center' && p.slot === i));
+  await still.reveal({ from: 'center', slot: hidden });
+  await until(() => still.errors.some((e) => /Le tour se termine/.test(e)), 'le joueur est prévenu que le tour se termine');
   assert.equal(host.host.game.reveals, g.reveals, 'aucune révélation pendant la résolution');
   await settled(host);
   g = host.host.game;
@@ -375,7 +384,7 @@ test('règles appliquées par l\'hôte : hors tour refusé, double appui ignoré
 });
 
 test('rechargement : un joueur puis l\'hôte rechargent l\'appli en pleine partie', async () => {
-  const t = await table(['Léa', 'Tom', 'Inès', 'Noé', 'Jade'], { hostOpts: { missMs: 300, trioMs: 300 } });
+  const t = await table(['Léa', 'Tom', 'Inès', 'Noé', 'Jade'], { hostOpts: { missMs: 300, trioMs: 300, rng: seeded(21) } });
   const { host, guests, all } = t;
   await host.send({ t: 'start' });
   await handsDelivered(all, host);
@@ -397,18 +406,28 @@ test('rechargement : un joueur puis l\'hôte rechargent l\'appli en pleine parti
     const moves = legalMoves(g);
     await act(t, moves[Math.floor(rng() * moves.length)]);
   }
-  // l'hôte recharge en plein tour (même en pleine résolution) : la partie reprend où elle en était
+  // l'hôte recharge en pleine résolution d'un tour raté : les cartes sont encore visibles, le tour n'est pas clos
+  await settled(host);
+  host.missMs = 2000; // le temps que tous les téléphones aient reçu le tour raté avant de couper l'hôte
+  await forceMiss(t);
+  assert.deepEqual([host.host.game.phase, host.host.game.outcome], ['resolve', 'miss']);
+  await sameView(t.all, host);
   const snapshot = JSON.stringify(host.host.game);
+  const { turn, current } = host.host.game;
   const hostStore = host.store;
   close(host);
+  assert.equal(hostStore.get('tp:host').game.phase, 'resolve', 'l\'état enregistré est bien celui du tour en cours de résolution');
   await until(() => !t.guests[0].hostOnline, 'les joueurs voient l\'hôte hors ligne', 3000);
+  assert.ok(t.guests.every((p) => p.room.game.phase === 'resolve'), 'pendant l\'absence de l\'hôte, la partie est figée');
   const host2 = phone('Léa (rechargée)', hostStore, { missMs: 300, trioMs: 300 });
   assert.equal(await host2.resume(), true);
-  assert.equal(JSON.stringify(host2.host.game), snapshot);
+  assert.equal(JSON.stringify(host2.host.game), snapshot, 'la partie reprend exactement où elle en était');
   await connected(host2);
   t.host = host2; t.all[0] = host2;
-  await until(() => t.guests.every((g) => g.hostOnline), 'hôte de retour');
+  await until(() => t.guests.every((p) => p.hostOnline), 'hôte de retour');
+  // … et le tour se termine tout seul, comme si de rien n'était
   await settled(host2);
+  assert.deepEqual([host2.host.game.phase, host2.host.game.turn, host2.host.game.current, host2.host.game.picks.length], ['play', turn + 1, (current + 1) % 5, 0]);
   await handsDelivered(t.all, host2);
   const end = await playOut(t, seeded(9));
   assert.equal(end.phase, 'over');
